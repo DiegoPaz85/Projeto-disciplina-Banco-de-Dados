@@ -1,0 +1,497 @@
+SCC0640 - PROJETO DE BASES DE DADOS
+
+GRUPO: BD
+INTEGRANTES: Diego Soares da Paz | Bianca sobrenome |  Pessoa 3| Pessoa 4
+MODELO UTILIZADO NO OLLAMA: gemma3:1b
+
+1. DESCRICAO FINAL DO SISTEMA
+Sistema de gestão de eventos e espaços que permite cadastrar eventos (com séries/edições), organizações e pessoas promotoras, atividades e suas sessões, espaços e recursos. Controla inscrições de participantes no evento e inscrições adicionais em sessões (com lista de espera automática), além de manter histórico de alterações de programação das sessões. O protótipo Python permite executar 5 consultas SQL pré-definidas e converter perguntas em linguagem natural para SQL usando um modelo local via Ollama.
+
+2. DECISOES DE PROJETO
+Q1: Pessoa e Organização são entidades separadas, ligadas a Evento por dois relacionamentos N:N (evento_pessoa, evento_organizacao), permitindo múltiplos promotores simultâneos. Uma VIEW Promotores unifica a consulta.
+Q2: Papéis em tabelas separadas: participante e organizador ligados a Evento; palestrante ligado a Sessao. Uma pessoa pode exercer os três simultaneamente.
+Q3: Atividade tem título/descrição/tipo; Sessao tem data/hora/espaço/vagas/exige_inscricao. Carga horária calculada por SUM; duração da sessão é coluna gerada.
+Q4: Entidade Serie opcional (id_serie NULL) guarda o compartilhado (nome base, descrição). Nome do evento é livre. ON DELETE SET NULL.
+Q5: vagas_limite <= capacidade por trigger; exige_inscricao por sessão; sessão lotada joga para ESPERA (lista de espera) automaticamente; cancelamento promove o mais antigo; trigger valida participante no evento.
+Q6: Histórico em sessao_historico, populado por trigger AFTER UPDATE quando muda data/hora/espaço.
+
+3. DDL COMPLETO
+
+-- ============================================================
+-- SCC0640 - PROJETO DE BASES DE DADOS
+-- Sistema de Gestão de Eventos e Espaços
+-- DDL completo - PostgreSQL
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- Limpeza (permite reexecutar o script)
+-- ------------------------------------------------------------
+DROP TABLE IF EXISTS sessao_historico CASCADE;
+DROP TABLE IF EXISTS inscricao_sessao CASCADE;
+DROP TABLE IF EXISTS participante CASCADE;
+DROP TABLE IF EXISTS organizador CASCADE;
+DROP TABLE IF EXISTS palestrante CASCADE;
+DROP TABLE IF EXISTS evento_organizacao CASCADE;
+DROP TABLE IF EXISTS evento_pessoa CASCADE;
+DROP TABLE IF EXISTS espaco_recurso CASCADE;
+DROP TABLE IF EXISTS sessao CASCADE;
+DROP TABLE IF EXISTS atividade CASCADE;
+DROP TABLE IF EXISTS evento CASCADE;
+DROP TABLE IF EXISTS serie CASCADE;
+DROP TABLE IF EXISTS espaco CASCADE;
+DROP TABLE IF EXISTS recurso CASCADE;
+DROP TABLE IF EXISTS pessoa CASCADE;
+DROP TABLE IF EXISTS organizacao CASCADE;
+
+DROP FUNCTION IF EXISTS fn_valida_capacidade_sessao() CASCADE;
+DROP FUNCTION IF EXISTS fn_conflito_espaco() CASCADE;
+DROP FUNCTION IF EXISTS fn_conflito_palestrante() CASCADE;
+DROP FUNCTION IF EXISTS fn_historico_sessao() CASCADE;
+DROP FUNCTION IF EXISTS fn_controla_inscricao() CASCADE;
+DROP FUNCTION IF EXISTS fn_promove_espera() CASCADE;
+
+DROP TYPE IF EXISTS tipo_atividade_enum CASCADE;
+DROP TYPE IF EXISTS status_inscricao_enum CASCADE;
+DROP TYPE IF EXISTS tipo_recurso_enum CASCADE;
+
+-- ------------------------------------------------------------
+-- TIPOS AUXILIARES
+-- ------------------------------------------------------------
+CREATE TYPE tipo_atividade_enum AS ENUM (
+    'PALESTRA', 'WORKSHOP', 'MINICURSO', 'PAINEL', 'MESA_REDONDA', 'APRESENTACAO'
+);
+
+CREATE TYPE status_inscricao_enum AS ENUM (
+    'CONFIRMADA', 'ESPERA', 'CANCELADA'
+);
+
+CREATE TYPE tipo_recurso_enum AS ENUM (
+    'PROJETOR', 'COMPUTADORES', 'AUDIO', 'INTERNET', 'OUTRO'
+);
+
+-- ------------------------------------------------------------
+-- TABELAS BASE (sem FKs)
+-- ------------------------------------------------------------
+CREATE TABLE pessoa (
+    id_pessoa  SERIAL PRIMARY KEY,
+    cpf        VARCHAR(14)  NOT NULL UNIQUE,
+    nome       VARCHAR(200) NOT NULL,
+    email      VARCHAR(200) NOT NULL UNIQUE,
+    telefone   VARCHAR(20)
+);
+
+CREATE TABLE organizacao (
+    id_organizacao SERIAL PRIMARY KEY,
+    cnpj           VARCHAR(18) NOT NULL UNIQUE,
+    nome           VARCHAR(200) NOT NULL,
+    tipo           VARCHAR(50),
+    email          VARCHAR(200)
+);
+
+CREATE TABLE serie (
+    id_serie   SERIAL PRIMARY KEY,
+    nome       VARCHAR(200) NOT NULL UNIQUE,
+    descricao  TEXT
+);
+
+CREATE TABLE espaco (
+    id_espaco    SERIAL PRIMARY KEY,
+    nome         VARCHAR(100) NOT NULL UNIQUE,
+    capacidade   INTEGER NOT NULL CHECK (capacidade > 0),
+    localizacao  VARCHAR(200)
+);
+
+CREATE TABLE recurso (
+    id_recurso  SERIAL PRIMARY KEY,
+    nome        VARCHAR(100) NOT NULL UNIQUE,
+    tipo        tipo_recurso_enum NOT NULL
+);
+
+-- ------------------------------------------------------------
+-- TABELAS COM FKs
+-- ------------------------------------------------------------
+CREATE TABLE evento (
+    id_evento    SERIAL PRIMARY KEY,
+    id_serie     INTEGER REFERENCES serie(id_serie)
+                 ON DELETE SET NULL ON UPDATE CASCADE,
+    nome         VARCHAR(200) NOT NULL,
+    descricao    TEXT,
+    data_inicio  DATE NOT NULL,
+    data_fim     DATE NOT NULL,
+    CHECK (data_fim >= data_inicio)
+);
+
+CREATE TABLE atividade (
+    id_atividade SERIAL PRIMARY KEY,
+    id_evento    INTEGER NOT NULL REFERENCES evento(id_evento)
+                 ON DELETE CASCADE ON UPDATE CASCADE,
+    titulo       VARCHAR(200) NOT NULL,
+    descricao    TEXT,
+    tipo         tipo_atividade_enum NOT NULL,
+    UNIQUE (id_evento, titulo)
+);
+
+CREATE TABLE sessao (
+    id_sessao        SERIAL PRIMARY KEY,
+    id_atividade     INTEGER NOT NULL REFERENCES atividade(id_atividade)
+                     ON DELETE CASCADE ON UPDATE CASCADE,
+    id_espaco        INTEGER NOT NULL REFERENCES espaco(id_espaco)
+                     ON DELETE RESTRICT ON UPDATE CASCADE,
+    data             DATE NOT NULL,
+    hora_inicio      TIME NOT NULL,
+    hora_fim         TIME NOT NULL,
+    vagas_limite     INTEGER CHECK (vagas_limite > 0),
+    exige_inscricao  BOOLEAN NOT NULL DEFAULT FALSE,
+    duracao          INTERVAL GENERATED ALWAYS AS (hora_fim - hora_inicio) STORED,
+    CHECK (hora_fim > hora_inicio),
+    CHECK (NOT exige_inscricao OR vagas_limite IS NOT NULL)
+);
+
+-- ------------------------------------------------------------
+-- JUNÇÕES N:N (PK composta)
+-- ------------------------------------------------------------
+CREATE TABLE evento_pessoa (
+    id_evento  INTEGER NOT NULL REFERENCES evento(id_evento)
+               ON DELETE CASCADE ON UPDATE CASCADE,
+    id_pessoa  INTEGER NOT NULL REFERENCES pessoa(id_pessoa)
+               ON DELETE CASCADE ON UPDATE CASCADE,
+    PRIMARY KEY (id_evento, id_pessoa)
+);
+
+CREATE TABLE evento_organizacao (
+    id_evento       INTEGER NOT NULL REFERENCES evento(id_evento)
+                    ON DELETE CASCADE ON UPDATE CASCADE,
+    id_organizacao  INTEGER NOT NULL REFERENCES organizacao(id_organizacao)
+                    ON DELETE CASCADE ON UPDATE CASCADE,
+    PRIMARY KEY (id_evento, id_organizacao)
+);
+
+CREATE TABLE espaco_recurso (
+    id_espaco   INTEGER NOT NULL REFERENCES espaco(id_espaco)
+                ON DELETE CASCADE ON UPDATE CASCADE,
+    id_recurso  INTEGER NOT NULL REFERENCES recurso(id_recurso)
+                ON DELETE CASCADE ON UPDATE CASCADE,
+    PRIMARY KEY (id_espaco, id_recurso)
+);
+
+CREATE TABLE palestrante (
+    id_pessoa  INTEGER NOT NULL REFERENCES pessoa(id_pessoa)
+               ON DELETE CASCADE ON UPDATE CASCADE,
+    id_sessao  INTEGER NOT NULL REFERENCES sessao(id_sessao)
+               ON DELETE CASCADE ON UPDATE CASCADE,
+    PRIMARY KEY (id_pessoa, id_sessao)
+);
+
+-- ------------------------------------------------------------
+-- ENTIDADES ASSOCIATIVAS
+-- ------------------------------------------------------------
+CREATE TABLE participante (
+    id_participante  SERIAL PRIMARY KEY,
+    id_pessoa        INTEGER NOT NULL REFERENCES pessoa(id_pessoa)
+                     ON DELETE CASCADE ON UPDATE CASCADE,
+    id_evento        INTEGER NOT NULL REFERENCES evento(id_evento)
+                     ON DELETE CASCADE ON UPDATE CASCADE,
+    data_inscricao   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (id_pessoa, id_evento)
+);
+
+CREATE TABLE organizador (
+    id_pessoa  INTEGER NOT NULL REFERENCES pessoa(id_pessoa)
+               ON DELETE CASCADE ON UPDATE CASCADE,
+    id_evento  INTEGER NOT NULL REFERENCES evento(id_evento)
+               ON DELETE CASCADE ON UPDATE CASCADE,
+    funcao     VARCHAR(100),
+    PRIMARY KEY (id_pessoa, id_evento)
+);
+
+CREATE TABLE inscricao_sessao (
+    id_inscricao     SERIAL PRIMARY KEY,
+    id_participante  INTEGER NOT NULL REFERENCES participante(id_participante)
+                     ON DELETE CASCADE ON UPDATE CASCADE,
+    id_sessao        INTEGER NOT NULL REFERENCES sessao(id_sessao)
+                     ON DELETE CASCADE ON UPDATE CASCADE,
+    status           status_inscricao_enum NOT NULL DEFAULT 'CONFIRMADA',
+    data_inscricao   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (id_participante, id_sessao)
+);
+
+-- ------------------------------------------------------------
+-- HISTÓRICO (entidade fraca)
+-- id_espaco SEM FK — auditoria deve sobreviver à remoção do espaço
+-- ------------------------------------------------------------
+CREATE TABLE sessao_historico (
+    id_historico  SERIAL PRIMARY KEY,
+    id_sessao     INTEGER NOT NULL REFERENCES sessao(id_sessao)
+                  ON DELETE CASCADE ON UPDATE CASCADE,
+    data          DATE NOT NULL,
+    hora_inicio   TIME NOT NULL,
+    hora_fim      TIME NOT NULL,
+    id_espaco     INTEGER NOT NULL,
+    alterado_em   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ------------------------------------------------------------
+-- FUNÇÕES E TRIGGERS
+-- ------------------------------------------------------------
+
+-- Trigger 1: vagas_limite <= capacidade do espaço
+CREATE OR REPLACE FUNCTION fn_valida_capacidade_sessao() RETURNS TRIGGER AS $$
+DECLARE
+    v_capacidade INTEGER;
+BEGIN
+    IF NEW.vagas_limite IS NOT NULL THEN
+        SELECT capacidade INTO v_capacidade FROM espaco WHERE id_espaco = NEW.id_espaco;
+        IF NEW.vagas_limite > v_capacidade THEN
+            RAISE EXCEPTION 'Vagas limite (%) excede capacidade do espaço (%).',
+                NEW.vagas_limite, v_capacidade;
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_valida_capacidade_sessao
+BEFORE INSERT OR UPDATE ON sessao
+FOR EACH ROW EXECUTE FUNCTION fn_valida_capacidade_sessao();
+
+-- Trigger 2: impede conflito de horário no mesmo espaço
+CREATE OR REPLACE FUNCTION fn_conflito_espaco() RETURNS TRIGGER AS $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM sessao s
+        WHERE s.id_espaco = NEW.id_espaco
+          AND s.data = NEW.data
+          AND s.id_sessao <> COALESCE(NEW.id_sessao, -1)
+          AND s.hora_inicio < NEW.hora_fim
+          AND s.hora_fim > NEW.hora_inicio
+    ) THEN
+        RAISE EXCEPTION 'Conflito: espaço % já ocupado em % (das % às %).',
+            NEW.id_espaco, NEW.data, NEW.hora_inicio, NEW.hora_fim;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_conflito_espaco
+BEFORE INSERT OR UPDATE ON sessao
+FOR EACH ROW EXECUTE FUNCTION fn_conflito_espaco();
+
+-- Trigger 3: impede conflito de horário do palestrante
+CREATE OR REPLACE FUNCTION fn_conflito_palestrante() RETURNS TRIGGER AS $$
+DECLARE
+    v_data DATE;
+    v_hora_inicio TIME;
+    v_hora_fim TIME;
+BEGIN
+    SELECT data, hora_inicio, hora_fim
+    INTO v_data, v_hora_inicio, v_hora_fim
+    FROM sessao WHERE id_sessao = NEW.id_sessao;
+
+    IF EXISTS (
+        SELECT 1 FROM palestrante p
+        JOIN sessao s ON s.id_sessao = p.id_sessao
+        WHERE p.id_pessoa = NEW.id_pessoa
+          AND p.id_sessao <> NEW.id_sessao
+          AND s.data = v_data
+          AND s.hora_inicio < v_hora_fim
+          AND s.hora_fim > v_hora_inicio
+    ) THEN
+        RAISE EXCEPTION 'Conflito: palestrante % já tem sessão sobreposta em %.',
+            NEW.id_pessoa, v_data;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_conflito_palestrante
+BEFORE INSERT OR UPDATE ON palestrante
+FOR EACH ROW EXECUTE FUNCTION fn_conflito_palestrante();
+
+-- Trigger 4: grava histórico de alterações de data/hora/espaço
+CREATE OR REPLACE FUNCTION fn_historico_sessao() RETURNS TRIGGER AS $$
+BEGIN
+    IF (OLD.data <> NEW.data
+        OR OLD.hora_inicio <> NEW.hora_inicio
+        OR OLD.hora_fim <> NEW.hora_fim
+        OR OLD.id_espaco <> NEW.id_espaco) THEN
+        INSERT INTO sessao_historico (id_sessao, data, hora_inicio, hora_fim, id_espaco)
+        VALUES (OLD.id_sessao, OLD.data, OLD.hora_inicio, OLD.hora_fim, OLD.id_espaco);
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_historico_sessao
+AFTER UPDATE ON sessao
+FOR EACH ROW EXECUTE FUNCTION fn_historico_sessao();
+
+-- Trigger 5: controla inscrição (valida evento + joga para ESPERA se lotado)
+CREATE OR REPLACE FUNCTION fn_controla_inscricao() RETURNS TRIGGER AS $$
+DECLARE
+    v_exige BOOLEAN;
+    v_vagas INTEGER;
+    v_ocupadas INTEGER;
+    v_evento_participante INTEGER;
+    v_evento_sessao INTEGER;
+BEGIN
+    SELECT s.exige_inscricao, s.vagas_limite, a.id_evento
+        INTO v_exige, v_vagas, v_evento_sessao
+    FROM sessao s
+    JOIN atividade a ON a.id_atividade = s.id_atividade
+    WHERE s.id_sessao = NEW.id_sessao;
+
+    SELECT id_evento INTO v_evento_participante
+    FROM participante WHERE id_participante = NEW.id_participante;
+
+    IF v_evento_participante IS NULL OR v_evento_participante <> v_evento_sessao THEN
+        RAISE EXCEPTION 'Participante não está inscrito no evento desta sessão.';
+    END IF;
+
+    IF v_exige AND NEW.status = 'CONFIRMADA' THEN
+        SELECT COUNT(*) INTO v_ocupadas
+        FROM inscricao_sessao
+        WHERE id_sessao = NEW.id_sessao AND status = 'CONFIRMADA';
+
+        IF v_ocupadas >= v_vagas THEN
+            NEW.status := 'ESPERA';
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_controla_inscricao
+BEFORE INSERT ON inscricao_sessao
+FOR EACH ROW EXECUTE FUNCTION fn_controla_inscricao();
+
+-- Trigger 6: promove da lista de espera quando há cancelamento
+CREATE OR REPLACE FUNCTION fn_promove_espera() RETURNS TRIGGER AS $$
+DECLARE
+    v_vagas INTEGER;
+    v_ocupadas INTEGER;
+    v_proximo INTEGER;
+BEGIN
+    IF NEW.status = 'CANCELADA' AND OLD.status = 'CONFIRMADA' THEN
+        SELECT vagas_limite INTO v_vagas FROM sessao WHERE id_sessao = NEW.id_sessao;
+        SELECT COUNT(*) INTO v_ocupadas FROM inscricao_sessao
+            WHERE id_sessao = NEW.id_sessao AND status = 'CONFIRMADA';
+        IF v_ocupadas < v_vagas THEN
+            SELECT id_inscricao INTO v_proximo FROM inscricao_sessao
+                WHERE id_sessao = NEW.id_sessao AND status = 'ESPERA'
+                ORDER BY data_inscricao ASC LIMIT 1;
+            IF v_proximo IS NOT NULL THEN
+                UPDATE inscricao_sessao SET status = 'CONFIRMADA'
+                    WHERE id_inscricao = v_proximo;
+            END IF;
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_promove_espera
+AFTER UPDATE ON inscricao_sessao
+FOR EACH ROW EXECUTE FUNCTION fn_promove_espera();
+
+4. CONSULTAS
+
+=========================================
+CONSULTA 1
+OBJETIVO: Listar todos os eventos com seus respectivos promotores (pessoas e organizações), mostrando o nome do evento, a data de início e quem o promove.
+SQL: SELECT e.nome AS evento, e.data_inicio, 'Pessoa' AS tipo_promotor, p.nome AS promotor
+FROM evento e
+LEFT JOIN evento_pessoa ep ON ep.id_evento = e.id_evento
+LEFT JOIN pessoa p ON p.id_pessoa = ep.id_pessoa
+UNION ALL
+SELECT e.nome, e.data_inicio, 'Organização', o.nome
+FROM evento e
+LEFT JOIN evento_organizacao eo ON eo.id_evento = e.id_evento
+LEFT JOIN organizacao o ON o.id_organizacao = eo.id_organizacao
+ORDER BY evento, tipo_promotor, promotor;
+=========================================
+
+=========================================
+CONSULTA 2
+OBJETIVO: Listar as sessões com taxa de ocupação superior a 40%, mostrando nome da atividade, evento, espaço, vagas, número de inscritos confirmados e o percentual de ocupação.
+SQL: SELECT a.titulo AS atividade, e.nome AS evento, s.data, s.hora_inicio, esp.nome AS espaco,
+       COALESCE(s.vagas_limite, esp.capacidade) AS vagas,
+       COUNT(i.id_inscricao) FILTER (WHERE i.status = 'CONFIRMADA') AS confirmados,
+       ROUND(100.0 * COUNT(i.id_inscricao) FILTER (WHERE i.status = 'CONFIRMADA')
+             / NULLIF(COALESCE(s.vagas_limite, esp.capacidade), 0), 1) AS pct_ocupacao
+FROM sessao s
+JOIN atividade a ON a.id_atividade = s.id_atividade
+JOIN evento e ON e.id_evento = a.id_evento
+JOIN espaco esp ON esp.id_espaco = s.id_espaco
+LEFT JOIN inscricao_sessao i ON i.id_sessao = s.id_sessao
+GROUP BY s.id_sessao, a.titulo, e.nome, s.data, s.hora_inicio, esp.nome, esp.capacidade, s.vagas_limite
+HAVING COUNT(i.id_inscricao) FILTER (WHERE i.status = 'CONFIRMADA') > 0
+ORDER BY pct_ocupacao DESC;
+=========================================
+
+=========================================
+CONSULTA 3
+OBJETIVO: Listar todos os participantes com a contagem de inscrições confirmadas, em lista de espera e canceladas, ordenado por quem tem mais inscrições em espera.
+SQL: SELECT p.nome AS participante, e.nome AS evento,
+       COUNT(i.id_inscricao) FILTER (WHERE i.status = 'CONFIRMADA') AS confirmadas,
+       COUNT(i.id_inscricao) FILTER (WHERE i.status = 'ESPERA')     AS em_espera,
+       COUNT(i.id_inscricao) FILTER (WHERE i.status = 'CANCELADA')  AS canceladas
+FROM participante part
+JOIN pessoa p ON p.id_pessoa = part.id_pessoa
+JOIN evento e ON e.id_evento = part.id_evento
+LEFT JOIN inscricao_sessao i ON i.id_participante = part.id_participante
+GROUP BY p.nome, e.nome
+ORDER BY em_espera DESC, confirmadas DESC, p.nome;
+=========================================
+
+=========================================
+CONSULTA 4
+OBJETIVO: Calcular a duração total da programação de cada evento (soma das durações de todas as sessões), mostrando também o número de atividades, sessões e participantes.
+SQL: WITH stats_programacao AS (
+    SELECT e.id_evento,
+           COUNT(DISTINCT a.id_atividade) AS atividades,
+           COUNT(DISTINCT s.id_sessao) AS sessoes,
+           COALESCE(SUM(s.duracao), '0 hours'::interval) AS duracao_total
+    FROM evento e
+    LEFT JOIN atividade a ON a.id_evento = e.id_evento
+    LEFT JOIN sessao s ON s.id_atividade = a.id_atividade
+    GROUP BY e.id_evento
+),
+stats_participantes AS (
+    SELECT id_evento, COUNT(*) AS participantes
+    FROM participante
+    GROUP BY id_evento
+)
+SELECT e.nome AS evento, e.data_inicio,
+       COALESCE(sp.atividades, 0) AS atividades,
+       COALESCE(sp.sessoes, 0) AS sessoes,
+       ROUND(EXTRACT(EPOCH FROM COALESCE(sp.duracao_total, '0 hours'::interval)) / 3600, 1) AS horas_totais,
+       COALESCE(spt.participantes, 0) AS participantes
+FROM evento e
+LEFT JOIN stats_programacao sp ON sp.id_evento = e.id_evento
+LEFT JOIN stats_participantes spt ON spt.id_evento = e.id_evento
+ORDER BY e.data_inicio;
+=========================================
+
+=========================================
+CONSULTA 5
+OBJETIVO: Produzir um ranking dos eventos por número de participantes, mostrando a posição, o nome, o total de atividades, sessões e participantes.
+SQL: WITH resumo AS (
+    SELECT e.id_evento, e.nome, e.data_inicio,
+           COUNT(DISTINCT a.id_atividade) AS atividades,
+           COUNT(DISTINCT s.id_sessao) AS sessoes,
+           (SELECT COUNT(*) FROM participante p WHERE p.id_evento = e.id_evento) AS participantes
+    FROM evento e
+    LEFT JOIN atividade a ON a.id_evento = e.id_evento
+    LEFT JOIN sessao s ON s.id_atividade = a.id_atividade
+    GROUP BY e.id_evento, e.nome, e.data_inicio
+)
+SELECT RANK() OVER (ORDER BY participantes DESC) AS posicao,
+       nome AS evento, data_inicio, atividades, sessoes, participantes
+FROM resumo
+ORDER BY posicao, nome;
+=========================================
+
+=========================================
+FIM DO ARQUIVO
+=========================================

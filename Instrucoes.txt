@@ -1,0 +1,166 @@
+============================================================
+SCC0640 - PROJETO DE BASES DE DADOS
+Sistema de Gestão de Eventos e Espaços
+INSTRUÇÕES DE INSTALAÇÃO E EXECUÇÃO
+============================================================
+
+INTEGRANTES
+------------------------------------------------------------
+Diego Soares da Paz - NUSP 8936415
+preencher: Nome 2 - NUSP 2
+preencher: Nome 3 - NUSP 3
+
+
+REQUISITOS DE SOFTWARE
+------------------------------------------------------------
+- Python 3.11 ou superior (testado em 3.12.4)
+- Docker (para PostgreSQL e Ollama em containers)
+- Modelo de linguagem local via Ollama: gemma3:1b
+  (o avaliador pode usar outro modelo editando config.json)
+
+Bibliotecas Python (instaladas via requirements.txt):
+- ollama
+- psycopg[binary]
+
+
+ESTRUTURA DE ARQUIVOS
+------------------------------------------------------------
+ProjetoBD/
+├── ER.pdf                        (diagrama E/R)
+├── ER.xml                        (fonte draw.io)
+├── Relacional.pdf                (modelo relacional Crow's Foot)
+├── Relacional.mmd                (fonte mermaid)
+├── Projeto.txt                   (documentação: decisões, DDL, consultas)
+├── DML.sql                       (dados de teste)
+├── Instrucoes.txt                (este arquivo)
+└── Prototipo/
+    ├── main.py                   (protótipo Python)
+    ├── config.json               (configuração de DB e Ollama)
+    └── requirements.txt          (dependências Python)
+
+
+INSTRUÇÕES PARA CRIAÇÃO DA BASE
+------------------------------------------------------------
+1) Iniciar o PostgreSQL em Docker:
+
+   docker run -d \
+     --name postgres-eventos \
+     -e POSTGRES_USER=postgres \
+     -e POSTGRES_PASSWORD=postgres \
+     -e POSTGRES_DB=eventos \
+     -p 5432:5432 \
+     -v postgres-eventos-data:/var/lib/postgresql/data \
+     postgres:16
+
+2) O DDL está embutido no arquivo Projeto.txt (seção "3. DDL COMPLETO").
+   O protótipo main.py o extrai automaticamente — não é necessário
+   executá-lo manualmente.
+
+   Para executar manualmente (opcional, para conferência):
+
+   python -c "from pathlib import Path; t=Path('Projeto.txt').read_text(); print(t.split('3. DDL COMPLETO',1)[1].split('4. CONSULTAS',1)[0].strip())" \
+     | docker exec -i postgres-eventos psql -U postgres -d eventos
+
+3) Caso o PostgreSQL esteja instalado diretamente no sistema (não em
+   Docker), basta ajustar config.json com as credenciais corretas.
+
+
+INSTRUÇÕES PARA EXECUÇÃO DO DML
+------------------------------------------------------------
+1) Com a base criada (DDL já executado), rodar:
+
+   docker exec -i postgres-eventos psql -U postgres -d eventos -v ON_ERROR_STOP=1 < DML.sql
+
+2) O DML é re-executável: começa com TRUNCATE ... RESTART IDENTITY CASCADE,
+   então pode ser rodado múltiplas vezes sem erro.
+
+3) Ao final, o script imprime:
+   - Estado das inscrições antes e depois do trigger 5 (lista de espera)
+   - Estado das inscrições antes e depois do trigger 6 (promoção)
+   - Histórico gerado pelo trigger 4 (auditoria)
+   - NOTICE [OK] para os triggers 1, 2, 3 (testes de falha controlados)
+   - Resumo com COUNT(*) de todas as tabelas
+
+
+INSTRUÇÕES PARA EXECUÇÃO DO PROTÓTIPO
+------------------------------------------------------------
+1) Iniciar o Ollama em Docker:
+
+   docker run -d \
+     --name ollama \
+     -v ollama:/root/.ollama \
+     -p 11434:11434 \
+     ollama/ollama
+
+2) Baixar o modelo:
+
+   docker exec -it ollama ollama pull gemma3:1b
+
+3) Instalar as dependências Python:
+
+   cd Prototipo
+   python -m pip install -r requirements.txt
+
+   (Em Ubuntu 24.04+, pode ser necessário criar um venv:
+    python3 -m venv .venv && source .venv/bin/activate
+    antes do pip install)
+
+4) Executar o protótipo:
+
+   cd Prototipo
+   python main.py
+
+5) O menu oferece:
+   1-5) Executar as 5 consultas definidas no Projeto.txt
+   6)   Fazer uma pergunta em linguagem natural (convertida em SQL via Ollama)
+   0)   Sair
+
+6) Para testar a conversão NL→SQL, exemplo de pergunta:
+   "Liste os nomes de todos os eventos"
+
+
+MODELO UTILIZADO NO OLLAMA
+------------------------------------------------------------
+gemma3:1b
+
+O avaliador pode alterar o modelo editando o campo "model" em
+Prototipo/config.json — nenhum arquivo .py precisa ser modificado.
+
+
+LIMITAÇÕES CONHECIDAS
+------------------------------------------------------------
+- O modelo gemma3:1b (1 bilhão de parâmetros) foi escolhido por
+  limitação de hardware (1.6 GB de RAM disponível na máquina de
+  desenvolvimento). Para perguntas em linguagem natural simples
+  (1-2 tabelas), a conversão NL→SQL funciona corretamente, com
+  few-shot prompt incluindo 4 exemplos do próprio esquema.
+
+- Para perguntas que envolvem colunas inexistentes (ex.: "idade dos
+  participantes"), o modelo pode ocasionalmente inventar a coluna.
+  Nesses casos, o PostgreSQL rejeita o SQL e o protótipo exibe a
+  mensagem de erro ao usuário — o SQL nunca é executado com dados
+  silenciosamente errados.
+
+- Modelos maiores (qwen2.5-coder:3b, qwen3:8b) foram testados e
+  funcionam melhor, mas exigem mais RAM do que a máquina de
+  desenvolvimento possui. Quem for avaliar pode utilizá-los livremente
+  editando config.json.
+
+- O trigger de conflito de palestrante (trg_conflito_palestrante)
+  dispara no cadastro do palestrante (INSERT/UPDATE em palestrante),
+  não quando uma sessão muda de horário. Se uma sessão for remarcada
+  para um horário em que seu palestrante já tem outra sessão, o
+  conflito não é detectado automaticamente. Melhoria futura: replicar
+  a lógica no trigger de UPDATE em sessao.
+
+
+OBSERVAÇÕES FINAIS
+------------------------------------------------------------
+- O arquivo Projeto.txt segue estritamente o template do enunciado
+  (seções 1, 2, 3, 4 e "FIM DO ARQUIVO").
+- O protótipo main.py carrega a configuração via BASE_DIR (Path),
+  conforme exigido, sem caminhos absolutos.
+- O DDL é extraído do Projeto.txt em tempo de execução, conforme
+  exigido, usando os marcadores "3. DDL COMPLETO" e "4. CONSULTAS".
+- As 5 consultas SQL também são extraídas do Projeto.txt em tempo
+  de execução — nenhuma consulta está hardcoded no main.py.

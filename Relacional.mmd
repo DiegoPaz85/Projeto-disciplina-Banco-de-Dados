@@ -1,0 +1,120 @@
+erDiagram
+    SERIE ||--o{ EVENTO : "pertence"
+    PESSOA ||--o{ EVENTO_PESSOA : ""
+    EVENTO ||--o{ EVENTO_PESSOA : ""
+    ORGANIZACAO ||--o{ EVENTO_ORGANIZACAO : ""
+    EVENTO ||--o{ EVENTO_ORGANIZACAO : ""
+    EVENTO ||--|{ ATIVIDADE : "contém"
+    ATIVIDADE ||--o{ SESSAO : "realiza"
+    ESPACO ||--o{ SESSAO : "ocupa"
+    ESPACO ||--o{ ESPACO_RECURSO : ""
+    RECURSO ||--o{ ESPACO_RECURSO : ""
+    PESSOA ||--o{ PARTICIPANTE : ""
+    EVENTO ||--o{ PARTICIPANTE : ""
+    PESSOA ||--o{ ORGANIZADOR : ""
+    EVENTO ||--o{ ORGANIZADOR : ""
+    PESSOA ||--o{ PALESTRANTE : ""
+    SESSAO ||--o{ PALESTRANTE : ""
+    PARTICIPANTE ||--o{ INSCRICAO_SESSAO : ""
+    SESSAO ||--o{ INSCRICAO_SESSAO : ""
+    SESSAO ||--o{ SESSAO_HISTORICO : "histórico"
+
+    PESSOA {
+        int id_pessoa PK
+        varchar cpf UK
+        varchar nome
+        varchar email UK
+        varchar telefone
+    }
+    ORGANIZACAO {
+        int id_organizacao PK
+        varchar cnpj UK
+        varchar nome
+        varchar tipo
+        varchar email
+    }
+    SERIE {
+        int id_serie PK
+        varchar nome UK
+        text descricao
+    }
+    EVENTO {
+        int id_evento PK
+        int id_serie FK
+        varchar nome
+        text descricao
+        date data_inicio
+        date data_fim
+    }
+    ESPACO {
+        int id_espaco PK
+        varchar nome UK
+        int capacidade
+        varchar localizacao
+    }
+    RECURSO {
+        int id_recurso PK
+        varchar nome UK
+        enum tipo
+    }
+    ATIVIDADE {
+        int id_atividade PK
+        int id_evento FK
+        varchar titulo
+        text descricao
+        enum tipo
+    }
+    SESSAO {
+        int id_sessao PK
+        int id_atividade FK
+        int id_espaco FK
+        date data
+        time hora_inicio
+        time hora_fim
+        int vagas_limite
+        bool exige_inscricao
+        interval duracao "GERADA"
+    }
+    PARTICIPANTE {
+        int id_participante PK
+        int id_pessoa FK
+        int id_evento FK
+        timestamp data_inscricao
+    }
+    ORGANIZADOR {
+        int id_pessoa PK,FK
+        int id_evento PK,FK
+        varchar funcao
+    }
+    PALESTRANTE {
+        int id_pessoa PK,FK
+        int id_sessao PK,FK
+    }
+    INSCRICAO_SESSAO {
+        int id_inscricao PK
+        int id_participante FK
+        int id_sessao FK
+        enum status
+        timestamp data_inscricao
+    }
+    SESSAO_HISTORICO {
+        int id_historico PK
+        int id_sessao FK
+        date data
+        time hora_inicio
+        time hora_fim
+        int id_espaco
+        timestamp alterado_em
+    }
+    EVENTO_PESSOA {
+        int id_evento PK,FK
+        int id_pessoa PK,FK
+    }
+    EVENTO_ORGANIZACAO {
+        int id_evento PK,FK
+        int id_organizacao PK,FK
+    }
+    ESPACO_RECURSO {
+        int id_espaco PK,FK
+        int id_recurso PK,FK
+    }
