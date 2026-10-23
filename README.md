@@ -1,4 +1,4 @@
-# 🎉 Sistema de Gestão de Eventos e Espaços
+#  Sistema de Gestão de Eventos e Espaços
 
 > Projeto da disciplina **SCC0640 / SCC0540 — Bases de Dados** (2026-2)
 > Sistema completo de gestão de eventos, espaços, atividades e inscrições,
@@ -11,7 +11,7 @@
 
 ---
 
-## 📑 Índice
+##  Índice
 
 - [Visão geral](#-visão-geral)
 - [Funcionalidades](#-funcionalidades)
@@ -29,7 +29,7 @@
 
 ---
 
-## 🎯 Visão geral
+##  Visão geral
 
 O sistema permite:
 
@@ -45,7 +45,7 @@ A integração com **LLM local** (via Ollama) permite que o usuário faça **per
 
 ---
 
-## ⚙️ Funcionalidades
+##  Funcionalidades
 
 ### Banco de dados
 
@@ -88,7 +88,7 @@ A integração com **LLM local** (via Ollama) permite que o usuário faça **per
 
 ---
 
-## 🏗 Arquitetura
+##  Arquitetura
 
 ```
 ┌─────────────────┐
@@ -112,7 +112,7 @@ O `main.py` extrai o DDL e as 5 consultas diretamente do `Projeto.txt` (fonte ú
 
 ---
 
-## 📁 Estrutura do projeto
+##  Estrutura do projeto
 
 ```
 ProjetoBD/
@@ -134,7 +134,7 @@ ProjetoBD/
 
 ---
 
-## 🔧 Pré-requisitos
+##  Pré-requisitos
 
 - **Docker** (para PostgreSQL e Ollama em containers)
 - **Python 3.11+** com `pip` e `venv`
@@ -150,7 +150,7 @@ python3 --version      # Python 3.11+
 
 ---
 
-## 🚀 Instalação rápida (TL;DR)
+##  Instalação rápida (TL;DR)
 
 Para quem já tem Docker e Python configurados:
 
@@ -188,7 +188,7 @@ python main.py
 
 ---
 
-## 📖 Instalação detalhada
+##  Instalação detalhada
 
 ### 1. Clonar o repositório
 
@@ -218,7 +218,7 @@ docker ps --filter name=postgres-eventos
 # esperado: Up X seconds
 ```
 
-> ⚠️ **Atenção:** se você já tiver PostgreSQL instalado diretamente no sistema (via `apt`), pare-o antes:
+>  **Atenção:** se você já tiver PostgreSQL instalado diretamente no sistema (via `apt`), pare-o antes:
 > ```bash
 > sudo systemctl stop postgresql
 > sudo systemctl disable postgresql
@@ -244,7 +244,7 @@ curl http://localhost:11434/api/tags
 # esperado: {"models":[{"name":"gemma3:1b",...}]}
 ```
 
-> 💡 **Escolha de modelo:** `gemma3:1b` (~800 MB) foi escolhido por caber em máquinas com pouca RAM. Se sua máquina tiver 8+ GB livres, considere `qwen2.5-coder:3b` (melhor em SQL) ou `qwen3:8b`. Para trocar, basta editar `Prototipo/config.json` após baixar.
+>  **Escolha de modelo:** `gemma3:1b` (~800 MB) foi escolhido por caber em máquinas com pouca RAM. Se sua máquina tiver 8+ GB livres, considere `qwen2.5-coder:3b` (melhor em SQL) ou `qwen3:8b`. Para trocar, basta editar `Prototipo/config.json` após baixar.
 
 ### 4. Criar o schema (DDL)
 
@@ -288,7 +288,7 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-> 💡 Em Ubuntu 24.04+, `pip install` global é bloqueado (PEP 668). O `venv` é obrigatório.
+>  Em Ubuntu 24.04+, `pip install` global é bloqueado (PEP 668). O `venv` é obrigatório.
 
 ### 7. Executar o protótipo
 
@@ -298,7 +298,7 @@ python main.py
 
 ---
 
-## 🎮 Como usar o protótipo
+##  Como usar o protótipo
 
 Ao iniciar, você verá:
 
@@ -353,7 +353,7 @@ O erro é **do PostgreSQL**, não silencioso — o SQL nunca executa com dados e
 
 ---
 
-## 🎨 Decisões de projeto
+##  Decisões de projeto
 
 As 6 decisões de modelagem que guiaram o banco:
 
@@ -370,7 +370,7 @@ Detalhes completos em `Projeto.txt`, seção "2. DECISOES DE PROJETO".
 
 ---
 
-## 🌟 Destaques técnicos
+##  Destaques técnicos
 
 ### Consulta 5 — `RANK()` para ranking
 
@@ -410,7 +410,7 @@ Com os exemplos, o modelo "completa o padrão" em vez de improvisar. Teste B ant
 
 ---
 
-## 👥 Equipe
+##  Equipe
 
 | Nome |
 |------|------|
@@ -434,7 +434,7 @@ Com os exemplos, o modelo "completa o padrão" em vez de improvisar. Teste B ant
 
 ---
 
-## 📚 Contexto acadêmico
+##  Contexto acadêmico
 
 **Disciplina:** SCC0640 / SCC0540 — Bases de Dados
 **Tecnologias obrigatórias:** PostgreSQL, Python 3.11+, Ollama
@@ -448,10 +448,10 @@ Com os exemplos, o modelo "completa o padrão" em vez de improvisar. Teste B ant
 - ✅ Conversão NL→SQL via Ollama
 - ✅ Estrutura portável (só `config.json` precisa ser editado)
 
-**Como contribuir:** veja [`CONTRIBUTING.md`](CONTRIBUTING.md) (em breve).
+**Como contribuir:** veja [`CONTRIBUTING.md`](CONTRIBUTING.md) (em breve nos cinemas...).
 
 ---
 
-## 📄 Licença
+##  Licença
 
 Projeto acadêmico — uso educacional. Consulte o enunciado da disciplina para políticas de plágio e colaboração.
